@@ -1,102 +1,26 @@
 # smtp tester
 
-Interactive CLI tool for testing SMTP servers. Connect once, send as many emails as you want without reconnecting.
-
-## Requirements
-
-Python 3.10+. No dependencies for plain text. Optionally:
-
-```bash
-pip install markdown   # enables HTML rendering for .md body files
-```
-
-## Usage
-
 ```bash
 python smtp_tester.py
 ```
 
-### Stage 1 — Connect
+Requires Python 3.10+. Install `markdown` (`pip install markdown`) for `.md` body files to send as HTML.
 
-Enter your server credentials. The mode (SSL/STARTTLS/plain) is auto-detected from the port:
+## Flow
 
-| Port | Mode |
-|------|------|
-| 465  | SSL/TLS |
-| 587  | STARTTLS |
-| other | prompted |
+**Stage 1** — enter host, port, credentials. Mode is auto-detected (port 465 → SSL, 587 → STARTTLS).
 
-### Stage 2 — Compose & Send
+**Stage 2** — compose and send. All fields default to the previous value on repeat sends.
 
-| Field | Behavior |
-|-------|----------|
-| **from** | Display name |
-| **address** | Sender email |
-| **to** | Recipient(s) — see below |
-| **subject** | Email subject |
-| **body** | Email body — see below |
+After sending: **↵** resend · **n** new email · **q / Esc** quit
 
-All fields remember the previous value as default. Press Enter to reuse.
+## Shortcuts
 
-#### Recipients
-
-Type one or more addresses inline:
+Prefix any `to` or `body` input with `@` to load from a file:
 
 ```
-to   alice@example.com, bob@example.com
+to    @recipients.txt
+body  @email.md
 ```
 
-Prefix with `@` to load from a file:
-
-```
-to   @recipients.txt
-```
-
-The file can be newline-separated, comma-separated, or semicolon-separated.
-
-#### Body
-
-Press Enter on the body prompt to type multiline — finish with **Ctrl+D**:
-
-```
-body
-         Hello,
-
-         This is a test email.
-         ^D
-```
-
-Start typing on the same line to use that as the first line, then Ctrl+D to finish.
-
-Prefix with `@` to load from a file:
-
-```
-body   @message.txt
-body   @newsletter.md
-```
-
-`.md` files are rendered to HTML (plain text fallback if `markdown` is not installed).
-
-If you press Ctrl+D immediately without typing anything, the previous body is reused.
-
-### After Sending
-
-```
-↵ send again    n new email    q quit
-```
-
-- **Enter** — resend the same email (same recipients, subject, body)
-- **n** — compose a new email from scratch
-- **q** — disconnect and exit
-
-The connection stays open between sends. If it drops, the tool reconnects automatically before the next send.
-
-## Recipient file format
-
-Any mix of separators works:
-
-```
-alice@example.com
-bob@example.com, carol@example.com
-dave@example.com; eve@example.com
-```
+Recipient files can be newline, comma, or semicolon separated. Body multiline input ends with **Ctrl+D**.

@@ -114,7 +114,7 @@ def ensure_connected(srv: smtplib.SMTP, cfg: dict) -> smtplib.SMTP:
         srv.noop()
         return srv
     except Exception:
-        warn("connection lost — reconnecting …")
+        info("reconnecting …")
         return make_connection(cfg)
 
 
@@ -402,16 +402,18 @@ def main():
 
     srv, cfg = stage_connect()
 
-    total, draft = 0, None
+    total, draft, need_compose = 0, None, True
     try:
         while True:
-            draft = compose(prev=draft)
+            if need_compose:
+                draft = compose(prev=draft)
             srv, sent = do_send(srv, cfg, draft)
             total += sent
 
             action = post_send_menu()
             if action == "q":
                 break
+            need_compose = action == "n"
             if action == "n":
                 draft = None
     except KeyboardInterrupt:
