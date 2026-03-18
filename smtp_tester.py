@@ -237,6 +237,83 @@ _CONN_ERRORS = (
     OSError,
 )
 
+# Human-readable hints for common SMTP reply codes
+_SMTP_HINTS = {
+    421: "service temporarily unavailable — try again later",
+    450: "mailbox temporarily unavailable",
+    451: "server error, aborted — try again later",
+    452: "insufficient server storage",
+    454: "TLS unavailable",
+    500: "syntax error or unrecognised command",
+    501: "bad parameters or arguments",
+    503: "bad sequence of commands",
+    530: "authentication required",
+    535: "authentication failed — wrong credentials",
+    541: "message rejected by recipient policy",
+    550: "mailbox unavailable or rejected",
+    551: "user not local",
+    552: "message too large or storage exceeded",
+    553: "mailbox name invalid",
+    554: "transaction failed or message refused",
+}
+
+def _decode(b) -> str:
+    """Decode bytes SMTP server response to a readable string."""
+    if isinstance(b, bytes):
+        return b.decode(errors="replace").strip()
+    return str(b).strip()
+
+def send_error(addr: str, exc: Exception) -> None:
+    """Print a highlighted, detailed send failure block."""
+    BG  = "\033[48;5;52m"   # dark red background
+    FG  = "\033[38;5;203m"  # soft red foreground
+    RST = "\033[0m"
+
+    # Extract structured info from smtplib exceptions
+    code, server_msg, kind = None, None, type(exc).__name__
+
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        # exc.recipients is a dict: {addr: (code, msg)}
+        for refused_addr, (c, m) in exc.recipients.items():
+            code, server_msg = c, _decode(m)
+    elif isinstance(exc, smtplib.SMTPResponseException):
+        code, server_msg = exc.smtp_code, _decode(exc.smtp_error)
+    elif isinstance(exc, OSError):
+        kind = "connection error"
+        server_msg = exc.strerror or str(exc)
+    else:
+        server_msg = str(exc)
+
+    hint = _SMTP_HINTS.get(code)
+
+    width = 54
+    bar   = f"  {BG}{FG}{' ' * width}{RST}"
+    line  = lambda t: f"  {BG}{FG}  {t:<{width - 2}}{RST}"
+
+    print()
+    print(bar)
+    print(line(f"✗  failed to send to {addr}"))
+    if code:
+        print(line(f"   code    {code}  ·  {kind}"))
+    else:
+        print(line(f"   type    {kind}"))
+    if server_msg:
+        # word-wrap long server messages
+        words, cur = server_msg.split(), ""
+        for word in words:
+            if len(cur) + len(word) + 1 > width - 11:
+                print(line(f"   server  {cur}"))
+                cur = word
+            else:
+                cur = f"{cur} {word}".strip()
+        if cur:
+            print(line(f"   server  {cur}"))
+    if hint:
+        print(line(f"   hint    {hint}"))
+    print(bar)
+    print()
+
+
 def do_send(srv: smtplib.SMTP, cfg: dict, draft: dict) -> tuple[smtplib.SMTP, int]:
     """
     Send to all recipients. Reconnects once on connection error.
@@ -260,32 +337,62 @@ def do_send(srv: smtplib.SMTP, cfg: dict, draft: dict) -> tuple[smtplib.SMTP, in
             srv.sendmail(draft["from_email"], [addr], msg.as_string())
             good(addr)
             sent += 1
-        except _CONN_ERRORS:
-            warn(f"connection error while sending to {addr} — reconnecting …")
+        except _CONN_ERRORS as e:
+            warn(f"connection dropped while sending to {addr} — reconnecting …")
             srv = make_connection(cfg)
             try:
                 srv.sendmail(draft["from_email"], [addr], msg.as_string())
                 good(addr)
                 sent += 1
             except Exception as e2:
-                bad(f"{addr}  ({e2})")
-        except smtplib.SMTPException as e:
-            bad(f"{addr}  ({e})")
+                send_error(addr, e2)
+        except Exception as e:
+            send_error(addr, e)
 
     return srv, sent
 
 
 # ── Post-send menu ─────────────────────────────────────────────────────────────
 
+def _getch() -> str:
+    """Read a single keypress without requiring Enter (Unix/macOS)."""
+    import tty, termios
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        # Eat any trailing escape sequence (e.g. arrow keys start with \x1b[)
+        if ch == "\x1b":
+            import select
+            if select.select([sys.stdin], [], [], 0.05)[0]:
+                sys.stdin.read(2)  # discard [ + letter
+        return ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
 def post_send_menu() -> str:
+    """
+    Returns '' (send again), 'n' (new email), or 'q' (quit).
+    Esc and Ctrl+C also quit.
+    """
     print(f"\n{dim('·' * 54)}")
     print(
         f"  {hi('↵')} send again   "
         f"{hi('n')} new email   "
-        f"{hi('q')} quit"
+        f"{hi('q / Esc')} quit"
     )
-    raw = input("  › ").strip().lower()
-    return raw if raw in ("n", "q") else ""
+    print("  › ", end="", flush=True)
+    while True:
+        ch = _getch()
+        if ch in ("\r", "\n", " "):   # Enter / Space → send again
+            print(); return ""
+        if ch in ("n", "N"):
+            print("n"); return "n"
+        if ch in ("q", "Q", "\x1b", "\x03"):  # q / Esc / Ctrl+C
+            print("q"); return "q"
+        # ignore anything else
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
